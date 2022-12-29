@@ -1,0 +1,5 @@
+/*.json
+venv
+user-venv
+dist/
+*.egg-info/

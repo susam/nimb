@@ -1,0 +1,13 @@
+[Unit]
+Description=NIMB
+After=network.target
+
+[Service]
+User=nimb
+WorkingDirectory=/opt/nimb
+ExecStart=/usr/bin/python3 nimb.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

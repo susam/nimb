@@ -1,0 +1,26 @@
+{
+  "channels": [
+    {
+      "id": "A",
+      "to": ["B"],
+      "type": "irc",
+      "tls": true,
+      "host": "irc.libera.chat",
+      "port": 6697,
+      "nick": "...",
+      "password": "...",
+      "channel": "#nimb",
+      "infix": " (irc): "
+    },
+    {
+      "id": "B",
+      "to": ["A"],
+      "type": "matrix",
+      "server": "https://matrix.org",
+      "username": "@...:matrix.org",
+      "password": "...",
+      "room": "#nimb:matrix.org",
+      "infix": ": "
+    }
+  ]
+}

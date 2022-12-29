@@ -1,0 +1,48 @@
+{
+  "channels": [
+    {
+      "id": "A",
+      "to": ["B", "C"],
+      "type": "irc",
+      "tls": true,
+      "host": "irc.libera.chat",
+      "port": 6697,
+      "nick": "...",
+      "password": "...",
+      "channel": "#nimb",
+      "infix": " (A): "
+    },
+    {
+      "id": "B",
+      "to": ["C", "D"],
+      "type": "irc",
+      "tls": true,
+      "host": "irc.libera.chat",
+      "port": 6697,
+      "nick": "..._",
+      "password": "...",
+      "channel": "#test",
+      "infix": " (B): "
+    },
+    {
+      "id": "C",
+      "to": ["A", "B"],
+      "type": "matrix",
+      "server": "https://matrix.org",
+      "username": "@...:matrix.org",
+      "password": "...",
+      "room": "#nimb:matrix.org",
+      "infix": " (C): "
+    },
+    {
+      "id": "D",
+      "to": ["C"],
+      "type": "matrix",
+      "server": "https://matrix.org",
+      "username": "@...:matrix.org",
+      "password": "...",
+      "room": "#test:matrix.org",
+      "infix": " (D): "
+    }
+  ]
+}
