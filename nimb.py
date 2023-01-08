@@ -15,8 +15,8 @@ _NAME = 'nimb'
 _log = logging.getLogger(_NAME)
 
 
-# IRC
-# ---
+# Internet Relay Chat
+# -------------------
 
 def _parse_line(line):
     # RFC 1459 - 2.3.1
@@ -51,22 +51,23 @@ def _parse_line(line):
     return sender, command, middle, trailing
 
 
-class IRCChannel:
-    def __init__(self, channel_config, callback):
-        self._log = logging.getLogger(self.__class__.__name__)
-        self.idx = channel_config['id']
-        self._to = channel_config['to']
-        self._host = channel_config['host']
-        self._port = channel_config['port']
-        self._tls = channel_config['tls']
-        self._nick = channel_config['nick']
-        self._password = channel_config['pass']
-        self._channel = channel_config['chan']
-        self._infix = channel_config['infix']
+class IRCClient:
+    def __init__(self, client_config, callback):
+        self._log = logging.getLogger(type(self).__name__)
+        self._tls = client_config['tls']
+        self._host = client_config['host']
+        self._port = client_config['port']
+        self._nick = client_config['nick']
+        self._password = client_config['password']
+        self._channels = client_config['channels']
         self._socket = None
         self._lock = threading.Lock()
         self._callback = callback
         self.running = True
+
+    def __str__(self):
+        return (f'{self.__class__.__name__}: '
+                f'{self._host}, {self._port}, {self._nick}')
 
     def connect(self):
         self._connect()
@@ -87,20 +88,25 @@ class IRCChannel:
                    .format(self._nick, self._nick, self._host, self._nick))
 
     def _join(self):
-        self._send('JOIN {}'.format(self._channel))
+        for channel in self._channels:
+            self._send('JOIN {}'.format(channel['channel']))
+
+    def _find_channel_by_middle(self, middle):
+        for channel in self._channels:
+            if channel['channel'] == middle.lower():
+                return channel
+        return None
 
     def loop(self):
         for line in self._recv():
-            self._log.info('received: %s', line)
+            self._log.info('recv: %s', line)
             sender, command, middle, trailing = _parse_line(line)
-            from_channel = (middle is not None and
-                            middle.lower() == self._channel.lower())
-            middle = middle.lower()
             if command == 'PING':
-                self._send_with_lock('PONG :{}'.format(trailing))
-            elif command == 'PRIVMSG' and from_channel:
-                sender_prefix = '{}{}'.format(sender, self._infix)
-                self._callback(self._to, sender_prefix, trailing)
+                self._send('PONG :{}'.format(trailing))
+            elif command == 'PRIVMSG':
+                channel = self._find_channel_by_middle(middle)
+                infix = channel['infix']
+                self._callback(channel['to'], f'{sender}{infix}', trailing)
         self._log.info('Stopping ...')
 
     def _recv(self):
@@ -118,20 +124,26 @@ class IRCChannel:
                 yield line
         self._log.info('Stopping ...')
 
-    def _send(self, msg):
+    def _sock_send(self, msg):
         self._socket.sendall(msg.encode() + b'\r\n')
+        _log.info('sent: %s', msg)
 
-    def _send_with_lock(self, msg):
+    def _send(self, msg):
         with self._lock:
-            self._send(msg)
+            self._sock_send(msg)
 
-    def send_message(self, prefix, msg):
+    def _send_message(self, recipient, prefix, msg):
         size = 400 - len(prefix)
         chunks = [msg[i:i + size] for i in range(0, len(msg), size)]
         with self._lock:
             for chunk in chunks:
-                self._send('PRIVMSG {} :{}{}\r\n'
-                           .format(self._channel, prefix, chunk))
+                self._sock_send('PRIVMSG {} :{}{}\r\n'
+                                .format(recipient, prefix, chunk))
+
+    def forward_message(self, to_labels, prefix, msg):
+        channels = [c for c in self._channels if c['label'] in to_labels]
+        for channel in channels:
+            self._send_message(channel['channel'], prefix, msg)
 
 
 # Matrix
@@ -155,7 +167,7 @@ def http_request(method, url, data, headers):
         raise
 
 
-def dict_value(data, keys):
+def lookup_map(data, keys):
     for key in keys:
         data = data.get(key)
         if data is None:
@@ -163,17 +175,13 @@ def dict_value(data, keys):
     return data
 
 
-class MatrixChannel:
-    def __init__(self, channel_config, callback):
-        self._log = logging.getLogger(self.__class__.__name__)
-        self.idx = channel_config['id']
-        self._to = channel_config['to']
-        self._username = channel_config['username']
-        self._password = channel_config['password']
-        self._server = channel_config['server']
-        self._room = channel_config['room']
-        self._infix = channel_config['infix']
-        self._enc_room = urllib.parse.quote(self._room)
+class MatrixClient:
+    def __init__(self, client_config, callback):
+        self._log = logging.getLogger(type(self).__name__)
+        self._server = client_config['server']
+        self._username = client_config['username']
+        self._password = client_config['password']
+        self._rooms = client_config['rooms']
         self._room_id = None
         self._enc_room_id = None
         self._token = None
@@ -182,6 +190,9 @@ class MatrixChannel:
         self._lock = threading.Lock()
         self._callback = callback
         self.running = True
+
+    def __str__(self):
+        return f'{self.__class__.__name__}: {self._server}, {self._username}'
 
     def connect(self):
         url = '{}/_matrix/client/v3/login'.format(self._server)
@@ -206,12 +217,13 @@ class MatrixChannel:
         self._next_batch = response['next_batch']
 
     def _join(self):
-        url = ('{}/_matrix/client/v3/join/{}'
-               .format(self._server, self._enc_room))
-        headers = {'Authorization': 'Bearer ' + self._token}
-        response = http_request('POST', url, {}, headers)
-        self._room_id = response['room_id']
-        self._enc_room_id = urllib.parse.quote(self._room_id)
+        for room in self._rooms:
+            enc_room = urllib.parse.quote(room['room'])
+            url = ('{}/_matrix/client/v3/join/{}'
+                   .format(self._server, enc_room))
+            headers = {'Authorization': 'Bearer ' + self._token}
+            response = http_request('POST', url, {}, headers)
+            room['room_id'] = response['room_id']
 
     def loop(self):
         while self.running:
@@ -220,31 +232,38 @@ class MatrixChannel:
             data = {'since': self._next_batch, 'timeout': 60000}
             response = http_request('GET', url, data, headers)
             self._next_batch = response['next_batch']
-            for sender, message in self._read_message(response):
-                sender_prefix = '{}{}'.format(sender, self._infix)
-                self._callback(self._to, sender_prefix, message)
+            for room, sender, message in self._read_messages(response):
+                infix = room['infix']
+                self._callback(room['to'], f'{sender}{infix}', message)
         self._log.info('Stopping ...')
 
-    def _read_message(self, response):
-        events = dict_value(response, ['rooms', 'join', self._room_id,
+    def _read_messages(self, response):
+        for room in self._rooms:
+            for sender, message in self._read_room_messages(room['room_id'],
+                                                            response):
+                yield room, sender, message
+
+    def _read_room_messages(self, room_id, response):
+        events = lookup_map(response, ['rooms', 'join', room_id,
                                        'timeline', 'events'])
         if events is None:
             return
 
         for event in events:
-            msgtype = dict_value(event, ['content', 'msgtype'])
+            msgtype = lookup_map(event, ['content', 'msgtype'])
             if msgtype != 'm.text':
                 continue
-            sender = dict_value(event, ['sender'])
+            sender = lookup_map(event, ['sender'])
             if sender == self._username:
                 continue
-            message = dict_value(event, ['content', 'body'])
+            message = lookup_map(event, ['content', 'body'])
             yield sender, message
 
-    def _send(self, message):
+    def _send(self, room_id, message):
+        enc_room_id = urllib.parse.quote(room_id)
         with self._lock:
             url = ('{}/_matrix/client/v3/rooms/{}/send/m.room.message/{}'
-                   .format(self._server, self._enc_room_id, self._txn))
+                   .format(self._server, enc_room_id, self._txn))
             headers = {'Authorization': 'Bearer ' + self._token}
             data = {
                 'msgtype': 'm.text',
@@ -253,31 +272,39 @@ class MatrixChannel:
             self._txn += 1
             http_request('PUT', url, data, headers)
 
-    def send_message(self, prefix, message):
-        self._send('{}{}'.format(prefix, message))
+    def send_message(self, room_id, prefix, message):
+        self._send(room_id, '{}{}'.format(prefix, message))
+
+    def forward_message(self, to_labels, prefix, message):
+        rooms = [r for r in self._rooms if r['label'] in to_labels]
+        for room in rooms:
+            self.send_message(room['room_id'], prefix, message)
 
 
-def connect_all(channels_config):
-    channels = []
+def create_clients(clients_config):
+    clients = []
 
-    def callback(to_channels, sender, message):
-        selected_channels = [c for c in channels if c.idx in to_channels]
-        for channel in selected_channels:
-            channel.send_message(sender, message)
+    def callback(to_labels, sender_prefix, message):
+        for client in clients:
+            client.forward_message(to_labels, sender_prefix, message)
 
-    for sno, channel_config in enumerate(channels_config):
-        channel_type = channel_config['type']
-        if channel_type == 'irc':
-            channel = IRCChannel(channel_config, callback)
-        elif channel_type == 'matrix':
-            channel = MatrixChannel(channel_config, callback)
+    for index, client_config in enumerate(clients_config):
+        client_type = client_config['type']
+        if client_type == 'irc':
+            clients.append(IRCClient(client_config, callback))
+        elif client_type == 'matrix':
+            clients.append(MatrixClient(client_config, callback))
         else:
-            continue
-        _log.info('Connecting to channel %d of type %s ...', sno, channel_type)
-        channel.connect()
-        channels.append(channel)
+            _log.warning('Ignored unknown client type: %s', client_type)
+        _log.info('Created client %d: %s', index, clients[-1])
+    return clients
 
-    return channels
+
+def connect_all(clients):
+    for index, client in enumerate(clients):
+        _log.info('Connecting with client %d: %s ...', index, client)
+        client.connect()
+    return clients
 
 
 def loop_all(channels):
@@ -301,8 +328,9 @@ def main():
     logging.basicConfig(format=log_fmt, level=logging.INFO)
     with open('{}.json'.format(_NAME), encoding='utf-8') as stream:
         config = json.load(stream)
-    channels = connect_all(config['channels'])
-    loop_all(channels)
+    clients = create_clients(config['clients'])
+    connect_all(clients)
+    loop_all(clients)
 
 
 if __name__ == '__main__':
