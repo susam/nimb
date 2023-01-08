@@ -256,8 +256,17 @@ class MatrixClient:
             sender = lookup_map(event, ['sender'])
             if sender == self._username:
                 continue
+            sender_display_name = self._get_display_name(sender)
+            sender = f'{sender_display_name} ({sender})'
             message = lookup_map(event, ['content', 'body'])
             yield sender, message
+
+    def _get_display_name(self, user_id):
+        enc_user_id = urllib.parse.quote(user_id)
+        url = '{}/_matrix/client/v3/profile/{}'.format(self._server, enc_user_id)
+        headers = {'Authorization': 'Bearer ' + self._token}
+        response = http_request('GET', url, {}, headers)
+        return response['displayname']
 
     def _send(self, room_id, message):
         enc_room_id = urllib.parse.quote(room_id)
