@@ -4,9 +4,6 @@ NIMB
 NIMB IRC Matrix Bridge (NIMB) is a simple tool that can establish
 multiple bridges between multiple IRC channels and Matrix rooms.
 
-In this document we will often refer to both IRC channels and Matrix
-rooms as "channels" for the sake of simplicity and brevity.
-
 NIMB can join multiple IRC and Matrix channels simultaneously.
 Whenever it finds a new message posted to any channel it has joined,
 it forwards that message to a set of other channels specified via
@@ -18,10 +15,26 @@ To see NIMB in action, join either of the two channels:
 - [#susam:matrix.org](https://app.element.io/#/room/#susam:matrix.org)
 
 The first one is an IRC channel and the second one is a Matrix room.
-There is an instance of NIMB running on one of my private systems that
-has joined both the channels to bridge them together. When a message
-is posted to one of the two above channels, NIMB will forward the
-message to the other channel automatically.
+There is an instance of NIMB running on a private system that has
+joined both the channels to bridge them together. When a message is
+posted to one of the two above channels, NIMB forwards the message to
+the other channel automatically.
+
+Note: In this document we often refer to both IRC channels and Matrix
+rooms as "channels" for the sake of simplicity and brevity.
+
+
+Contents
+--------
+
+* [Get Started](#get-started)
+* [Configuration](#configuration)
+  * [Simple Configuration](#simple-configuration)
+  * [Complex Configuration](#complex-configuration)
+  * [Configuration Keys](#configuration-keys)
+* [Differences from Matrix Appservice](#differences-from-matrix-appservice)
+* [License](#license)
+* [Support](#support)
 
 
 Get Started
@@ -66,70 +79,120 @@ Configuration
 NIMB reads its configuration from a file named `nimb.json` in the
 current working directory.
 
+
+### Simple Configuration
+
 See [etc/nimb.json](etc/simple.json) for a simple example of a
 configuration. Here is the content of this file:
 
 ```json
 {
-  "channels": [
+  "clients": [
     {
-      "id": "A",
-      "to": ["B"],
       "type": "irc",
       "tls": true,
       "host": "irc.libera.chat",
       "port": 6697,
       "nick": "...",
+      "user": "...",
       "password": "...",
-      "channel": "#nimb",
-      "infix": " (libera): "
+      "channels": [
+        {
+          "channel": "#nimb",
+          "infix": " (libera): ",
+          "label": "A",
+          "to": ["B"]
+        }
+      ]
     },
     {
-      "id": "B",
-      "to": ["A"],
       "type": "matrix",
       "server": "https://matrix.org",
       "username": "@...:matrix.org",
       "password": "...",
-      "room": "#nimb:matrix.org",
-      "infix": " (matrix): "
+      "rooms": [
+        {
+          "room": "#nimb:matrix.org",
+          "infix": " (matrix): ",
+          "label": "B",
+          "to": ["A"]
+        }
+      ]
     }
   ]
 }
 ```
 
-The triple-dots (`...`) in the above example represents placeholders
-that need to be replaced with actual credentials.
+The occurrences of triple-dots (`...`) in the above example represent
+placeholders that need to be replaced with actual credentials.
 
-The value of the top-level `"channels"` key defines all the channels
-that NIMB should join. The configuration above specifies an IRC
-channel and a Matrix room.
+The value of the top-level `"clients"` key defines all the IRC or
+Matrix clients that NIMB should create to connect to IRC networks and
+Matrix servers. The configuration above specifies that NIMB should
+create two clients: one to connect to `irc.libera.chat` and another to
+connect to `matrix.org`.
 
-The configuration for the IRC channel has `"id"` set to `"A"` and the
-configuration for the Matrix room has `"id"` set to `"B"`. These ID
-values are used in the values of the `"to"` keys. When NIMB finds a
-new message posted to a channel, it looks up the `"to"` key for that
-channel. Its value must be a list of `"id"` values that define other
-channels. NIMB then forwards the message to all channels identified by
-the IDs specified by the `"to"` list.
+Each client entry has various property names and values that define
+the connection parameters. Each IRC client entry has a `"channels"`
+property that defines a list of channels the IRC client should join.
+Similarly, each Matrix client entry has a `"rooms"` property that
+defines a list of rooms that the Matrix room should join.
+
+In the example above, the configuration for the IRC channel has
+`"label"` set to `"A"` and the configuration for the Matrix room has
+`"label"` set to `"B"`. These label values are used in the values of
+the `"to"` keys. When NIMB finds a new message posted to a channel, it
+looks up the `"to"` key for that channel. Its value must be a list of
+`"label"` values that were used to label other channels. NIMB then
+forwards the message to all channels labelled with the labels
+specified by the `"to"` list.
 
 For example, the above configuration says that when a message is
-posted to channel A (an IRC channel on Libera), it should be forwarded
-to channel B (a Matrix room). Similarly, when a message is posted to
-channel B, it should be forwarded to channel A. In this manner, the
-above configuration bridges channels A and B.
+posted to the IRC channel labelled A, it should be forwarded to the
+Matrix room labelled B. Similarly, when a message is posted to the
+room labelled B, it should be forwarded to the channel labelled A. In
+this manner, the above configuration bridges the channel labelled A
+and the room labelled B.
 
-The meaning of most configuration keys for each channel entry in the
-configuration example above are self-explanatory, especially, the ones
-that specify the connection parameters are self-descriptive. The
-following list describes the keys that are not so obvious:
 
-  - `id`: An identifier that identifies the configuration entry.
+### Complex Configuration
 
-  - `to`: A list of identifiers of target channels where messages
-    posted to the current channel must be forwarded to.
+It is possible to label multiple channels/rooms with the same label
+string. For example, if three channels are labelled as `"A"` and a
+message is received on another channel that has its `"to"` value set
+to `["A"]`, then the message received on that channel would be
+forwarded to all channels labelled `"A"`.
 
-  - `type`: Protocol name. Must be either `irc` or `matrix`.
+It is possible to make quite complex configurations with an arbitrary
+number of clients and channels defined with complex forwarding rules
+to bridge them. For example, see [etc/complex.json](etc/complex.json)
+that creates two IRC clients and one Matrix client to connect to
+several IRC channels and a matrix rooms. Some of the IRC channels are
+labelled A, some are labelled B, and the Matrix room is labelled C.
+The `"to"` list for each channel/room specifies where the messages
+received on each channel/room should be forwarded to.
+
+It is also possible for the `"to"` list of a channel entry to have the
+same label as that of the channel itself. In such a case, NIMB will
+copy every message received on that channel and post it again on the
+same channel. Thus members of the channel would see every message
+twice: once posted by the original sender and once again reposted by
+NIMB. Such a configuration is perhaps pretty pointless. Nevertheless
+NIMB is flexible enough to support such a configuration.
+
+NIMB only forwards messages posted by other users. It never forwards
+messages it has posted itself. In this manner, it avoids infinite
+forwarding loops.
+
+
+### Configuration Keys
+
+The meaning of most configuration keys in the example presented
+earleir are self-explanatory, especially, the ones that specify the
+connection parameters are self-descriptive. The following list
+describes the keys that are not so obvious:
+
+  - `type`: Client protocol. Must be either `irc` or `matrix`.
 
   - `infix`: A string that is inserted between the sender's name and
     the message while forwarding message. For example, with the above
@@ -137,15 +200,11 @@ following list describes the keys that are not so obvious:
     world` in the Libera channel, NIMB posts the following message in
     the Matrix channel: `alice (libera): hello, world`.
 
-It is possible to make quite complex configurations with an arbitrary
-number of channels defined with complex forwarding rules to bridge
-them. For example, see [etc/complex.json](etc/complex.json) that
-defines four channels A, B, C, and D and forwards messages from A to B
-and C, from B to C and D, from C to A and B, and from D to C.
+  - `label`: A string to label a channel. The label can then be used
+    in the `to` list described below.
 
-NIMB only forwards messages posted by other users. It never forwards
-messages it has posted itself. In this manner, it avoids infinite
-forwarding loops.
+  - `to`: A list of labels of target channels where messages posted to
+    the current channel must be forwarded to.
 
 
 Differences from Matrix Appservice

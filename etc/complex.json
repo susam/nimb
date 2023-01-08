@@ -1,48 +1,64 @@
 {
-  "channels": [
+  "clients": [
     {
-      "id": "A",
-      "to": ["B", "C"],
       "type": "irc",
       "tls": true,
       "host": "irc.libera.chat",
       "port": 6697,
       "nick": "...",
+      "user": "...",
       "password": "...",
-      "channel": "#nimb",
-      "infix": " (A): "
+      "channels": [
+        {
+          "channel": "#nimb",
+          "infix": " (irc::#nimb): ",
+          "label": "A",
+          "to": ["B", "C"]
+        }
+      ]
     },
     {
-      "id": "B",
-      "to": ["C", "D"],
       "type": "irc",
       "tls": true,
       "host": "irc.libera.chat",
       "port": 6697,
-      "nick": "..._",
+      "nick": "...",
+      "user": "...",
       "password": "...",
-      "channel": "#test",
-      "infix": " (B): "
+      "channels": [
+        {
+          "channel": "#foo",
+          "infix": " (irc::#foo): ",
+          "label": "A",
+          "to": ["B"]
+        },
+        {
+          "channel": "#bar",
+          "infix": " (irc::#bar): ",
+          "label": "B",
+          "to": ["A", "C"]
+        },
+        {
+          "channel": "#baz",
+          "infix": " (irc::#baz): ",
+          "label": "B",
+          "to": ["C"]
+        }
+      ]
     },
     {
-      "id": "C",
-      "to": ["A", "B"],
       "type": "matrix",
       "server": "https://matrix.org",
       "username": "@...:matrix.org",
       "password": "...",
-      "room": "#nimb:matrix.org",
-      "infix": " (C): "
-    },
-    {
-      "id": "D",
-      "to": ["C"],
-      "type": "matrix",
-      "server": "https://matrix.org",
-      "username": "@...:matrix.org",
-      "password": "...",
-      "room": "#test:matrix.org",
-      "infix": " (D): "
+      "rooms": [
+        {
+          "room": "#nimb:matrix.org",
+          "infix": " (matrix::#nimb): ",
+          "label": "C",
+          "to": ["A"]
+        }
+      ]
     }
   ]
 }

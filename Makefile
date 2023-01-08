@@ -42,10 +42,10 @@ coverage:
 	. ./venv && coverage report --show-missing
 	. ./venv && coverage html
 
-password:
-	grep -r '"password":' .
+check-password:
+	! grep -r '"password":' . | grep -vE '^\./[^/]*.json|Makefile|\.\.\.'
 
-checks: lint test password
+checks: lint test check-password
 
 clean:
 	rm -rf *.pyc __pycache__
