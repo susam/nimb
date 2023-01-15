@@ -9,6 +9,7 @@ Changelog
 - One client/connection per IRC network or Matrix server.
 - Channels in the same network/server are joined by the same client.
 - Include Matrix user's display name in forwarded messages.
+- Reconnect to network/server on encountering error.
 
 
 0.1.0 (2022-12-28)

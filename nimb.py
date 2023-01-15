@@ -8,6 +8,7 @@ import logging
 import socket
 import ssl
 import threading
+import time
 import urllib.parse
 import urllib.request
 
@@ -63,16 +64,28 @@ class IRCClient:
         self._socket = None
         self._lock = threading.Lock()
         self._callback = callback
+        self._recovery_delay = 1
         self.running = True
 
     def __str__(self):
         return (f'{self.__class__.__name__}: '
                 f'{self._host}, {self._port}, {self._nick}')
 
-    def connect(self):
+    def run(self):
+        while self.running:
+            try:
+                self._run()
+            except:
+                self._log.exception('Client encountered error')
+                self._log.info(f'Reconnecting in {self._recovery_delay} s ...')
+                time.sleep(self._recovery_delay)
+                self._recovery_delay = min(self._recovery_delay * 2, 3600)
+
+    def _run(self):
         self._connect()
         self._auth()
         self._join()
+        self._monitor()
 
     def _connect(self):
         self._socket = socket.create_connection((self._host, self._port))
@@ -91,15 +104,10 @@ class IRCClient:
         for channel in self._channels:
             self._send('JOIN {}'.format(channel['channel']))
 
-    def _find_channel_by_middle(self, middle):
-        for channel in self._channels:
-            if channel['channel'] == middle.lower():
-                return channel
-        return None
-
-    def loop(self):
+    def _monitor(self):
         for line in self._recv():
             self._log.info('recv: %s', line)
+            self._recovery_delay = 1
             sender, command, middle, trailing = _parse_line(line)
             if command == 'PING':
                 self._send('PONG :{}'.format(trailing))
@@ -109,14 +117,20 @@ class IRCClient:
                 self._callback(channel['to'], f'{sender}{infix}', trailing)
         self._log.info('Stopping ...')
 
+    def _find_channel_by_middle(self, middle):
+        for channel in self._channels:
+            if channel['channel'] == middle.lower():
+                return channel
+        return None
+
     def _recv(self):
         buffer = ''
         while self.running:
             data = self._socket.recv(1024)
             if len(data) == 0:
-                msg = 'Received zero-length payload from server'
-                logging.error(msg)
-                raise Exception(msg)
+                message = 'Received zero-length payload from server'
+                logging.error(message)
+                raise Exception(message)
             buffer += data.decode(errors='replace')
             lines = buffer.split('\r\n')
             lines, buffer = lines[:-1], lines[-1]
@@ -124,26 +138,26 @@ class IRCClient:
                 yield line
         self._log.info('Stopping ...')
 
-    def _sock_send(self, msg):
-        self._socket.sendall(msg.encode() + b'\r\n')
-        _log.info('sent: %s', msg)
+    def _sock_send(self, message):
+        self._socket.sendall(message.encode() + b'\r\n')
+        self._log.info('sent: %s', message)
 
-    def _send(self, msg):
+    def _send(self, message):
         with self._lock:
-            self._sock_send(msg)
+            self._sock_send(message)
 
-    def _send_message(self, recipient, prefix, msg):
+    def _send_message(self, recipient, prefix, message):
         size = 400 - len(prefix)
-        chunks = [msg[i:i + size] for i in range(0, len(msg), size)]
         with self._lock:
-            for chunk in chunks:
-                self._sock_send('PRIVMSG {} :{}{}\r\n'
-                                .format(recipient, prefix, chunk))
+            for line in message.splitlines():
+                chunks = [line[i:i + size] for i in range(0, len(line), size)]
+                for chunk in chunks:
+                    self._sock_send(f'PRIVMSG {recipient} :{prefix}{chunk}')
 
-    def forward_message(self, to_labels, prefix, msg):
+    def forward_message(self, to_labels, prefix, message):
         channels = [c for c in self._channels if c['label'] in to_labels]
         for channel in channels:
-            self._send_message(channel['channel'], prefix, msg)
+            self._send_message(channel['channel'], prefix, message)
 
 
 # Matrix
@@ -189,12 +203,29 @@ class MatrixClient:
         self._next_batch = None
         self._lock = threading.Lock()
         self._callback = callback
+        self._recovery_delay = 1
         self.running = True
 
     def __str__(self):
         return f'{self.__class__.__name__}: {self._server}, {self._username}'
 
-    def connect(self):
+    def run(self):
+        while self.running:
+            try:
+                self._run()
+            except:
+                self._log.exception('Client encountered error')
+                self._log.info(f'Reconnecting in {self._recovery_delay} s ...')
+                time.sleep(self._recovery_delay)
+                self._recovery_delay = min(self._recovery_delay * 2, 60)
+
+    def _run(self):
+        self._connect()
+        self._sync()
+        self._join()
+        self._monitor()
+
+    def _connect(self):
         url = '{}/_matrix/client/v3/login'.format(self._server)
         headers = {'Content-Type': 'application/json'}
         data = {
@@ -207,8 +238,6 @@ class MatrixClient:
         }
         response = http_request('POST', url, data, headers)
         self._token = response['access_token']
-        self._sync()
-        self._join()
 
     def _sync(self):
         url = '{}/_matrix/client/v3/sync'.format(self._server)
@@ -225,17 +254,21 @@ class MatrixClient:
             response = http_request('POST', url, {}, headers)
             room['room_id'] = response['room_id']
 
-    def loop(self):
+    def _monitor(self):
         while self.running:
-            url = '{}/_matrix/client/v3/sync'.format(self._server)
-            headers = {'Authorization': 'Bearer ' + self._token}
-            data = {'since': self._next_batch, 'timeout': 60000}
-            response = http_request('GET', url, data, headers)
-            self._next_batch = response['next_batch']
-            for room, sender, message in self._read_messages(response):
-                infix = room['infix']
-                self._callback(room['to'], f'{sender}{infix}', message)
+            self._new_sync()
+            self._recovery_delay = 1
         self._log.info('Stopping ...')
+
+    def _new_sync(self):
+        url = '{}/_matrix/client/v3/sync'.format(self._server)
+        headers = {'Authorization': 'Bearer ' + self._token}
+        data = {'since': self._next_batch, 'timeout': 60000}
+        response = http_request('GET', url, data, headers)
+        self._next_batch = response['next_batch']
+        for room, sender, message in self._read_messages(response):
+            infix = room['infix']
+            self._callback(room['to'], f'{sender}{infix}', message)
 
     def _read_messages(self, response):
         for room in self._rooms:
@@ -263,7 +296,7 @@ class MatrixClient:
 
     def _get_display_name(self, user_id):
         enc_user_id = urllib.parse.quote(user_id)
-        url = '{}/_matrix/client/v3/profile/{}'.format(self._server, enc_user_id)
+        url = f'{self._server}/_matrix/client/v3/profile/{enc_user_id}'
         headers = {'Authorization': 'Bearer ' + self._token}
         response = http_request('GET', url, {}, headers)
         return response['displayname']
@@ -309,17 +342,10 @@ def create_clients(clients_config):
     return clients
 
 
-def connect_all(clients):
-    for index, client in enumerate(clients):
-        _log.info('Connecting with client %d: %s ...', index, client)
-        client.connect()
-    return clients
-
-
-def loop_all(channels):
+def run(clients):
     workers = []
-    for channel in channels:
-        worker = threading.Thread(target=channel.loop)
+    for client in clients:
+        worker = threading.Thread(target=client.run)
         workers.append(worker)
 
     for worker in workers:
@@ -338,8 +364,7 @@ def main():
     with open('{}.json'.format(_NAME), encoding='utf-8') as stream:
         config = json.load(stream)
     clients = create_clients(config['clients'])
-    connect_all(clients)
-    loop_all(clients)
+    run(clients)
 
 
 if __name__ == '__main__':

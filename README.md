@@ -82,7 +82,7 @@ current working directory.
 
 ### Simple Configuration
 
-See [etc/nimb.json](etc/simple.json) for a simple example of a
+See [etc/simple.json](etc/simple.json) for a simple example of a
 configuration. Here is the content of this file:
 
 ```json
