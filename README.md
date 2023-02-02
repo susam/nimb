@@ -161,7 +161,7 @@ It is possible to label multiple channels/rooms with the same label
 string. For example, if three channels are labelled as `"A"` and a
 message is received on another channel that has its `"to"` value set
 to `["A"]`, then the message received on that channel would be
-forwarded to all channels labelled `"A"`.
+forwarded to all three channels labelled `"A"`.
 
 It is possible to make quite complex configurations with an arbitrary
 number of clients and channels defined with complex forwarding rules
