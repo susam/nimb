@@ -60,9 +60,11 @@ dist: clean
 	. ./venv && python3 -m build
 	. ./venv && twine check dist/*
 	unzip -c dist/*.whl '*/METADATA'
+	unzip -t dist/*.whl
+	tar -tvf dist/*.tar.gz
 
 upload:
-	twine upload dist/*
+	. ./venv && twine upload dist/*
 
 user-venv: FORCE
 	rm -rf ~/.venv/user-nimb user-venv
@@ -80,6 +82,7 @@ verify-sdist: user-venv
 verify-bdist: user-venv
 	. ./user-venv && pip3 install nimb
 	. ./user-venv && command -v nimb
+
 
 # Deployment Targets
 # ------------------

@@ -28,5 +28,8 @@ nimb = "nimb:main"
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
+# The presence of etc/ directory prevents setuptools from
+# autodiscovering nimb.py, so we explicitly ask it to include this
+# module.
 [tool.setuptools]
 py-modules = ["nimb"]

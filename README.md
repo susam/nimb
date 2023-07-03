@@ -52,7 +52,7 @@ Perform the following steps to get started with NIMB:
 
     ```sh
     cd nimb
-    cp etc/template.json nimb.json
+    cp etc/simple.json nimb.json
     ```
 
     Then edit the new configuration file named `nimb.json`. Some
@@ -223,7 +223,8 @@ describe how NIMB is different from the Matrix bridge service.
   admin cannot remove another admin from the room. This is no longer
   an issue. Unlinking the bridge from a room does remove the bridge
   user from the room. However, NIMB has always been easily removable.
-  Any admin of a Matrix room can remove NIMB from the room.
+  Any admin of a Matrix room can remove NIMB from the room provided
+  NIMB itself was not promoted to an admin.
 
 - Since NIMB works as a regular IRC client and a regular Matrix
   client, it can work with any IRC network or Matrix server and does
@@ -232,8 +233,9 @@ describe how NIMB is different from the Matrix bridge service.
 - The Matrix `appservice` can only bridge one Matrix room to one IRC
   channel. NIMB can join multiple IRC and Matrix channels
   simultaneously and forward message from any channel to any subset of
-  other channels. It can even bridge multiple IRC channels together.
-  Similarly, it can also bridge multiple Matrix channels together.
+  configured channels. It can even bridge multiple IRC channels
+  together. Similarly, it can also bridge multiple Matrix channels
+  together.
 
 - Matrix `appservice` makes the IRC users appear in the Matrix room
   and Matrix users appear in the IRC channel in the respective user
