@@ -107,7 +107,6 @@ class IRCClient:
     def _monitor(self):
         for line in self._recv():
             self._log.info('recv: %s', line)
-            self._recovery_delay = 1
             sender, command, middle, trailing = _parse_line(line)
             if command == 'PING':
                 self._send('PONG :{}'.format(trailing))
@@ -115,6 +114,7 @@ class IRCClient:
                 channel = self._find_channel_by_middle(middle)
                 infix = channel['infix']
                 self._callback(channel['to'], f'{sender}{infix}', trailing)
+                self._recovery_delay = 1
         self._log.info('Stopping ...')
 
     def _find_channel_by_middle(self, middle):
@@ -257,7 +257,6 @@ class MatrixClient:
     def _monitor(self):
         while self.running:
             self._new_sync()
-            self._recovery_delay = 1
         self._log.info('Stopping ...')
 
     def _new_sync(self):
@@ -269,6 +268,7 @@ class MatrixClient:
         for room, sender, message in self._read_messages(response):
             infix = room['infix']
             self._callback(room['to'], f'{sender}{infix}', message)
+            self._recovery_delay = 1
 
     def _read_messages(self, response):
         for room in self._rooms:
