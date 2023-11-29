@@ -52,10 +52,6 @@ def _parse_line(line):
     return sender, command, middle, trailing
 
 
-def _irc_sanitize(s):
-    return s.translate(str.maketrans('', '', '\0\r\n'))
-
-
 class IRCClient:
     def __init__(self, client_config, callback):
         self._log = logging.getLogger(type(self).__name__)
@@ -151,8 +147,8 @@ class IRCClient:
             self._sock_send(message)
 
     def _send_message(self, recipient, prefix, message):
-        prefix = _irc_sanitize(prefix)
-        message = _irc_sanitize(message)
+        prefix = prefix.translate(str.maketrans('\0\r\n', '   '))
+        message = message.replace('\0', ' ')
         size = 400 - len(prefix)
         with self._lock:
             for line in message.splitlines():
