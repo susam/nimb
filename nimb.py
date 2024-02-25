@@ -75,9 +75,9 @@ class IRCClient:
         while self.running:
             try:
                 self._run()
-            except:
+            except Exception:
                 self._log.exception('Client encountered error')
-                self._log.info(f'Reconnecting in {self._recovery_delay} s ...')
+                self._log.info('Reconnecting in %d s', self._recovery_delay)
                 time.sleep(self._recovery_delay)
                 self._recovery_delay = min(self._recovery_delay * 2, 3600)
 
@@ -111,17 +111,52 @@ class IRCClient:
             if command == 'PING':
                 self._send('PONG :{}'.format(trailing))
             elif command == 'PRIVMSG':
-                channel = self._find_channel_by_middle(middle)
+                channel = self._find_channel_config_by_middle(middle)
                 infix = channel['infix']
-                self._callback(channel['to'], f'{sender}{infix}', trailing)
+                self._callback(channel['to'], f'{sender}{infix}: ', trailing)
                 self._recovery_delay = 1
+            elif command in ('JOIN', 'PART'):
+                channel = self._find_channel_config_by_middle(middle)
+                infix = channel['infix']
+                action = {
+                    'JOIN': 'joined',
+                    'PART': 'left',
+                }.get(command) + ' ' + channel['channel']
+                message = f' [{trailing}]' if trailing is not None else ''
+                message = f'{sender}{infix} has {action}{message}'
+                self._callback(channel['to'], message, '')
+                self._recovery_delay = 1
+            elif command == 'QUIT':
+                # Note: The following strategy of forwarding the QUIT
+                # message to all destination channels is not optimal.
+                # Say, destination channel C is receiving messages
+                # from channel A but not from channel B, i.e., A -> C.
+                # If a nick belonging to channel B quits, the QUIT
+                # message for that nick would still be forwarded to
+                # channel C.  An ideal implementation should filter
+                # self._channels below to pick only those channels
+                # where the quitting nick is joined to.
+                to_labels = self._all_to_labels()
+                message = f' [{trailing}]' if trailing is not None else ''
+                message = f'{sender} has quit {self._host}{message}'
+                for to_label in to_labels:
+                    self._callback(to_label, message, '')
+                self._recovery_delay = 1
+
         self._log.info('Stopping ...')
 
-    def _find_channel_by_middle(self, middle):
+    def _find_channel_config_by_middle(self, middle):
         for channel in self._channels:
             if channel['channel'] == middle.lower():
                 return channel
         return None
+
+    def _all_to_labels(self):
+        to_labels = set()
+        for channel in self._channels:
+            for to_label in channel['to']:
+                to_labels.add(to_label)
+        return to_labels
 
     def _recv(self):
         buffer = ''
@@ -215,9 +250,9 @@ class MatrixClient:
         while self.running:
             try:
                 self._run()
-            except:
+            except Exception:
                 self._log.exception('Client encountered error')
-                self._log.info(f'Reconnecting in {self._recovery_delay} s ...')
+                self._log.info('Reconnecting in %d s', self._recovery_delay)
                 time.sleep(self._recovery_delay)
                 self._recovery_delay = min(self._recovery_delay * 2, 60)
 
@@ -268,8 +303,9 @@ class MatrixClient:
         response = http_request('GET', url, data, headers)
         self._next_batch = response['next_batch']
         for room, sender, message in self._read_messages(response):
+            self._log.info('read: %s: %s: %s', room['room'], sender, message)
             infix = room['infix']
-            self._callback(room['to'], f'{sender}{infix}', message)
+            self._callback(room['to'], f'{sender}{infix}: ', message)
             self._recovery_delay = 1
 
     def _read_messages(self, response):
@@ -315,6 +351,7 @@ class MatrixClient:
             }
             self._txn += 1
             http_request('PUT', url, data, headers)
+        self._log.info('sent: %s', message)
 
     def send_message(self, room_id, prefix, message):
         self._send(room_id, '{}{}'.format(prefix, message))

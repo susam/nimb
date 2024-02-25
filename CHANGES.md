@@ -4,6 +4,10 @@ Changelog
 0.2.0 (UNRELEASED)
 ------------------
 
+### Added
+
+- Forward join, part, and quit messages from IRC.
+
 ### Changed
 
 - One client/connection per IRC network or Matrix server.

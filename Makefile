@@ -32,7 +32,7 @@ lint:
 	. ./venv && ! isort --quiet --diff . | grep .
 	. ./venv && pycodestyle .
 	. ./venv && pyflakes .
-	. ./venv && pylint -d C0115,R0902,C0116,C0209 nimb
+	. ./venv && pylint -d C0115,R0902,C0116,C0209,W0703 nimb
 
 test:
 	python3 -m unittest -v
