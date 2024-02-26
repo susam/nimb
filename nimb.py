@@ -119,23 +119,20 @@ class IRCClient:
                 channel = self._find_channel_config_by_middle(middle)
                 infix = channel['infix']
                 action = {
-                    'JOIN': 'joined',
-                    'PART': 'left',
-                }.get(command) + ' ' + channel['channel']
+                    'JOIN': ' has joined',
+                    'PART': ' has left',
+                }.get(command) + f' {channel["channel"]} ({self._host})'
                 message = f' [{trailing}]' if trailing is not None else ''
-                message = f'{sender}{infix} has {action}{message}'
+                message = f'{sender}{infix}{action}{message}'
                 self._callback(channel['to'], message, '')
                 self._recovery_delay = 1
+            elif command == 'NICK':
+                to_labels = self._all_to_labels()
+                message = f'{sender} is now known as {trailing} on {self._host}'
+                for to_label in to_labels:
+                    self._callback(to_label, message, '')
+                self._recovery_delay = 1
             elif command == 'QUIT':
-                # Note: The following strategy of forwarding the QUIT
-                # message to all destination channels is not optimal.
-                # Say, destination channel C is receiving messages
-                # from channel A but not from channel B, i.e., A -> C.
-                # If a nick belonging to channel B quits, the QUIT
-                # message for that nick would still be forwarded to
-                # channel C.  An ideal implementation should filter
-                # self._channels below to pick only those channels
-                # where the quitting nick is joined to.
                 to_labels = self._all_to_labels()
                 message = f' [{trailing}]' if trailing is not None else ''
                 message = f'{sender} has quit {self._host}{message}'
@@ -144,6 +141,18 @@ class IRCClient:
                 self._recovery_delay = 1
 
         self._log.info('Stopping ...')
+
+        # Note: The above strategy of forwarding the NICK/QUIT
+        # messages to all destinations is not optimal.  Say,
+        # destination channel C is receiving messages from channel A
+        # but not from channel B, i.e., A -> C.  If a nick belonging
+        # to channel B quits, the QUIT message for that nick would
+        # still be forwarded to channel C.  An ideal implementation
+        # should filter self._channels below to pick only those
+        # channels where the quitting nick is joined to, i.e., the
+        # method _all_to_labels() below should be replaced by
+        # _find_channels_by_nick() but that will require implementing
+        # nick-tracking by each channel.
 
     def _find_channel_config_by_middle(self, middle):
         for channel in self._channels:
