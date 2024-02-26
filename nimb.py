@@ -130,7 +130,8 @@ class IRCClient:
                 self._recovery_delay = 1
             elif command == 'NICK':
                 to_labels = self._all_to_labels()
-                message = f'{sender} is now known as {trailing} on {self._host}'
+                message = (f'{sender} is now known as {trailing} '
+                           f'on {self._host}')
                 for to_label in to_labels:
                     self._callback(to_label, '', message)
                 self._recovery_delay = 1
@@ -336,7 +337,7 @@ class MatrixClient:
     def _read_messages(self, response):
         for room in self._rooms:
             for (kind, sender, content) in \
-                self._read_room_messages(room['room_id'], response):
+                    self._read_room_messages(room['room_id'], response):
                 yield kind, room, sender, content
 
     def _read_room_messages(self, room_id, response):
@@ -358,7 +359,7 @@ class MatrixClient:
 
             if msgtype == 'm.room.message':
                 message = lookup_map(event, ['content', 'body'])
-                yield MatxrixClient.MSG_MESSAGE, sender, message
+                yield MatrixClient.MSG_MESSAGE, sender, message
             elif msgtype == 'm.room.member':
                 membership = lookup_map(event, ['content', 'membership'])
                 yield MatrixClient.MSG_MEMBER, sender, membership
