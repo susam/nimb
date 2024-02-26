@@ -108,6 +108,8 @@ class IRCClient:
         for line in self._recv():
             self._log.info('recv: %s', line)
             sender, command, middle, trailing = _parse_line(line)
+            # self._log.info('parsed: %s, %s, %s, %s',
+            #                sender, command, middle, trailing)
             if command == 'PING':
                 self._send('PONG :{}'.format(trailing))
             elif command == 'PRIVMSG':
@@ -119,25 +121,25 @@ class IRCClient:
                 channel = self._find_channel_config_by_middle(middle)
                 infix = channel['infix']
                 action = {
-                    'JOIN': ' has joined',
-                    'PART': ' has left',
-                }.get(command) + f' {channel["channel"]} ({self._host})'
+                    'JOIN': ' has joined ',
+                    'PART': ' has left ',
+                }.get(command) + f'{channel["channel"]} ({self._host})'
                 message = f' [{trailing}]' if trailing is not None else ''
                 message = f'{sender}{infix}{action}{message}'
-                self._callback(channel['to'], message, '')
+                self._callback(channel['to'], '', message)
                 self._recovery_delay = 1
             elif command == 'NICK':
                 to_labels = self._all_to_labels()
                 message = f'{sender} is now known as {trailing} on {self._host}'
                 for to_label in to_labels:
-                    self._callback(to_label, message, '')
+                    self._callback(to_label, '', message)
                 self._recovery_delay = 1
             elif command == 'QUIT':
                 to_labels = self._all_to_labels()
                 message = f' [{trailing}]' if trailing is not None else ''
                 message = f'{sender} has quit {self._host}{message}'
                 for to_label in to_labels:
-                    self._callback(to_label, message, '')
+                    self._callback(to_label, '', message)
                 self._recovery_delay = 1
 
         self._log.info('Stopping ...')
@@ -236,6 +238,10 @@ def lookup_map(data, keys):
 
 
 class MatrixClient:
+
+    MSG_MESSAGE = 'msg_message'
+    MSG_MEMBER = 'msg_member'
+
     def __init__(self, client_config, callback):
         self._log = logging.getLogger(type(self).__name__)
         self._server = client_config['server']
@@ -311,17 +317,27 @@ class MatrixClient:
         data = {'since': self._next_batch, 'timeout': 60000}
         response = http_request('GET', url, data, headers)
         self._next_batch = response['next_batch']
-        for room, sender, message in self._read_messages(response):
-            self._log.info('read: %s: %s: %s', room['room'], sender, message)
+        for kind, room, sender, content in self._read_messages(response):
+            self._log.info('read: %s: %s: %s: %s',
+                           kind, room['room'], sender, content)
             infix = room['infix']
-            self._callback(room['to'], f'{sender}{infix}: ', message)
-            self._recovery_delay = 1
+            if kind == MatrixClient.MSG_MESSAGE:
+                self._callback(room['to'], f'{sender}{infix}: ', content)
+                self._recovery_delay = 1
+            elif kind == MatrixClient.MSG_MEMBER:
+                action = {
+                    'join': ' has joined ',
+                    'leave': ' has left ',
+                }.get(content) + f'{room["room"]} ({self._server})'
+                message = f'{sender}{action}'
+                self._callback(room['to'], '', message)
+                self._recovery_delay = 1
 
     def _read_messages(self, response):
         for room in self._rooms:
-            for sender, message in self._read_room_messages(room['room_id'],
-                                                            response):
-                yield room, sender, message
+            for (kind, sender, content) in \
+                self._read_room_messages(room['room_id'], response):
+                yield kind, room, sender, content
 
     def _read_room_messages(self, room_id, response):
         events = lookup_map(response, ['rooms', 'join', room_id,
@@ -330,16 +346,22 @@ class MatrixClient:
             return
 
         for event in events:
-            msgtype = lookup_map(event, ['content', 'msgtype'])
-            if msgtype != 'm.text':
+            msgtype = event.get('type')
+            if msgtype not in ['m.room.message', 'm.room.member']:
                 continue
+
             sender = lookup_map(event, ['sender'])
             if sender == self._username:
                 continue
             sender_display_name = self._get_display_name(sender)
             sender = f'{sender_display_name} ({sender})'
-            message = lookup_map(event, ['content', 'body'])
-            yield sender, message
+
+            if msgtype == 'm.room.message':
+                message = lookup_map(event, ['content', 'body'])
+                yield MatxrixClient.MSG_MESSAGE, sender, message
+            elif msgtype == 'm.room.member':
+                membership = lookup_map(event, ['content', 'membership'])
+                yield MatrixClient.MSG_MEMBER, sender, membership
 
     def _get_display_name(self, user_id):
         enc_user_id = urllib.parse.quote(user_id)

@@ -6,7 +6,8 @@ Changelog
 
 ### Added
 
-- Forward join, part, and quit messages from IRC.
+- Forward `JOIN`, `PART`, `NICK`, and `QUIT` messages from IRC.
+- Forward member joining and leaving messages from Matrix.
 
 ### Changed
 
