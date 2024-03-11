@@ -371,14 +371,14 @@ class MatrixClient:
         response = http_request('GET', url, {}, headers)
         return response['displayname']
 
-    def _send(self, room_id, message):
+    def _send(self, msgtype, room_id, message):
         enc_room_id = urllib.parse.quote(room_id)
         with self._lock:
             url = ('{}/_matrix/client/v3/rooms/{}/send/m.room.message/{}'
                    .format(self._server, enc_room_id, self._txn))
             headers = {'Authorization': 'Bearer ' + self._token}
             data = {
-                'msgtype': 'm.text',
+                'msgtype': msgtype,
                 'body': message,
             }
             self._txn += 1
@@ -386,12 +386,18 @@ class MatrixClient:
         self._log.info('sent: %s', message)
 
     def send_message(self, room_id, prefix, message):
-        self._send(room_id, '{}{}'.format(prefix, message))
+        self._send('m.text', room_id, '{}{}'.format(prefix, message))
+
+    def send_notice(self, room_id, message):
+        self._send('m.notice', room_id, message)
 
     def forward_message(self, to_labels, prefix, message):
         rooms = [r for r in self._rooms if r['label'] in to_labels]
         for room in rooms:
-            self.send_message(room['room_id'], prefix, message)
+            if prefix == '':
+                self.send_notice(room['room_id'], message)
+            else:
+                self.send_message(room['room_id'], prefix, message)
 
 
 def create_clients(clients_config):
