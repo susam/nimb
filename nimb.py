@@ -95,14 +95,14 @@ class IRCClient:
                                                    server_hostname=self._host)
 
     def _auth(self):
-        self._send('PASS {}'.format(self._password))
-        self._send('NICK {}'.format(self._nick))
-        self._send('USER {} {} {} :{}'
+        self._lock_send('PASS {}'.format(self._password))
+        self._lock_send('NICK {}'.format(self._nick))
+        self._lock_send('USER {} {} {} :{}'
                    .format(self._nick, self._nick, self._host, self._nick))
 
     def _join(self):
         for channel in self._channels:
-            self._send('JOIN {}'.format(channel['channel']))
+            self._lock_send('JOIN {}'.format(channel['channel']))
 
     def _monitor(self):
         for line in self._recv():
@@ -111,7 +111,7 @@ class IRCClient:
             # self._log.info('parsed: %s, %s, %s, %s',
             #                sender, command, middle, trailing)
             if command == 'PING':
-                self._send('PONG :{}'.format(trailing))
+                self._lock_send('PONG :{}'.format(trailing))
             elif command == 'PRIVMSG':
                 channel = self._find_channel_config_by_middle(middle)
                 infix = channel['infix']
@@ -189,9 +189,12 @@ class IRCClient:
         self._socket.sendall(message.encode() + b'\r\n')
         self._log.info('sent: %s', message)
 
-    def _send(self, message):
+    def _lock_send(self, message):
         with self._lock:
             self._sock_send(message)
+
+    def _send_action(self, recipient, message):
+        self._lock_send(f'PRIVMSG {recipient} :\x01ACTION {message}\x01')
 
     def _send_message(self, recipient, prefix, message):
         prefix = prefix.translate(str.maketrans('\0\r\n', '   '))

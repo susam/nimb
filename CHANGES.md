@@ -8,7 +8,7 @@ Changelog
 
 - Forward `JOIN`, `PART`, `NICK`, and `QUIT` messages from IRC.
 - Forward member joining and leaving messages from Matrix.
-- Send membership change messages as notice to Matrix rooms.
+- Send membership change messages as notices to Matrix rooms.
 
 ### Changed
 
