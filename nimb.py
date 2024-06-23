@@ -66,6 +66,7 @@ class IRCClient:
         self._callback = callback
         self._recovery_delay = 1
         self.running = True
+        self._channel_nicks = {}
 
     def __str__(self):
         return (f'{self.__class__.__name__}: '
@@ -97,78 +98,91 @@ class IRCClient:
     def _auth(self):
         self._lock_send('PASS {}'.format(self._password))
         self._lock_send('NICK {}'.format(self._nick))
-        self._lock_send('USER {} {} {} :{}'
-                   .format(self._nick, self._nick, self._host, self._nick))
+        self._lock_send(
+            'USER {} {} {} :{}'
+            .format(self._nick, self._nick, self._host, self._nick)
+        )
 
     def _join(self):
         for channel in self._channels:
-            self._lock_send('JOIN {}'.format(channel['channel']))
+            channel_name = channel['channel']
+            self._lock_send('JOIN {}'.format(channel_name))
+            self._channel_nicks[channel_name] = set()
 
     def _monitor(self):
         for line in self._recv():
             self._log.info('recv: %s', line)
             sender, command, middle, trailing = _parse_line(line)
-            # self._log.info('parsed: %s, %s, %s, %s',
-            #                sender, command, middle, trailing)
+            self._log.info('parsed: %s, %s, %s, %s',
+                           sender, command, middle, trailing)
             if command == 'PING':
                 self._lock_send('PONG :{}'.format(trailing))
+            elif command == '353':
+                channel = middle.split()[-1]
+                nicks = trailing.split()
+                nicks = [
+                    nick[1:] if nick[0] == '@' else nick for nick in nicks
+                ]
+                nicks = [
+                    nick[1:] if nick[0] == '+' else nick for nick in nicks
+                ]
+                for nick in nicks:
+                    self._channel_nicks[channel].add(nick)
             elif command == 'PRIVMSG':
-                channel = self._find_channel_config_by_middle(middle)
+                channel = self._find_channel_config(middle)
                 infix = channel['infix']
                 self._callback(channel['to'], f'<{sender}{infix}> ', trailing)
                 self._recovery_delay = 1
-            elif command in ('JOIN', 'PART'):
-                channel = self._find_channel_config_by_middle(middle)
-                infix = channel['infix']
-                action = {
-                    'JOIN': ' has joined ',
-                    'PART': ' has left ',
-                }.get(command) + f'{channel["channel"]} ({self._host})'
-                message = f' [{trailing}]' if trailing is not None else ''
-                message = f'{sender}{infix}{action}{message}'
+            elif command == 'JOIN':
+                channel = self._find_channel_config(middle)
+                message = (
+                    f'{sender}{channel["infix"]} has joined '
+                    f'{channel["channel"]} ({self._host})'
+                )
+                self._channel_nicks[channel['channel']].add(sender)
+                self._callback(channel['to'], '', message)
+                self._recovery_delay = 1
+            elif command == 'PART':
+                channel = self._find_channel_config(middle)
+                reason = f' [{trailing}]' if trailing is not None else ''
+                message = (
+                    f'{sender}{channel["infix"]} has left '
+                    f'{channel["channel"]} ({self._host}){reason}'
+                )
+                self._channel_nicks[channel['channel']].discard(sender)
                 self._callback(channel['to'], '', message)
                 self._recovery_delay = 1
             elif command == 'NICK':
-                to_labels = self._all_to_labels()
-                message = (f'{sender} is now known as {trailing} '
-                           f'on {self._host}')
-                for to_label in to_labels:
-                    self._callback(to_label, '', message)
+                nick_channels = self._find_channels_containing_nick(sender)
+                message = (
+                    f'{sender} is now known as {trailing} on {self._host}'
+                )
+                for channel_name in nick_channels:
+                    channel = self._find_channel_config(channel_name)
+                    self._channel_nicks[channel_name].discard(sender)
+                    self._channel_nicks[channel_name].add(trailing)
+                    self._callback(channel['to'], '', message)
                 self._recovery_delay = 1
             elif command == 'QUIT':
-                to_labels = self._all_to_labels()
-                message = f' [{trailing}]' if trailing is not None else ''
-                message = f'{sender} has quit {self._host}{message}'
-                for to_label in to_labels:
-                    self._callback(to_label, '', message)
+                nick_channels = self._find_channels_containing_nick(sender)
+                reason = f' [{trailing}]' if trailing is not None else ''
+                message = f'{sender} has quit {self._host}{reason}'
+                for channel_name in nick_channels:
+                    channel = self._find_channel_config(channel_name)
+                    self._channel_nicks[channel_name].discard(sender)
+                    self._callback(channel['to'], '', message)
                 self._recovery_delay = 1
 
         self._log.info('Stopping ...')
 
-        # Note: The above strategy of forwarding the NICK/QUIT
-        # messages to all destinations is not optimal.  Say,
-        # destination channel C is receiving messages from channel A
-        # but not from channel B, i.e., A -> C.  If a nick belonging
-        # to channel B quits, the QUIT message for that nick would
-        # still be forwarded to channel C.  An ideal implementation
-        # should filter self._channels below to pick only those
-        # channels where the quitting nick is joined to, i.e., the
-        # method _all_to_labels() below should be replaced by
-        # _find_channels_by_nick() but that will require implementing
-        # nick-tracking by each channel.
-
-    def _find_channel_config_by_middle(self, middle):
+    def _find_channel_config(self, middle):
         for channel in self._channels:
             if channel['channel'] == middle.lower():
                 return channel
         return None
 
-    def _all_to_labels(self):
-        to_labels = set()
-        for channel in self._channels:
-            for to_label in channel['to']:
-                to_labels.add(to_label)
-        return to_labels
+    def _find_channels_containing_nick(self, nick):
+        return [k for k, v in self._channel_nicks.items() if nick in v]
 
     def _recv(self):
         buffer = ''
