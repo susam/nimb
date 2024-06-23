@@ -2,14 +2,18 @@
 
 """NIMB - NIMB IRC Matrix Bridge."""
 
+from __future__ import annotations
+
 import json
 import logging
+import pathlib
 import socket
 import ssl
 import threading
 import time
 import urllib.parse
 import urllib.request
+from typing import Any, Callable, Iterator
 
 _NAME = "nimb"
 _log = logging.getLogger(_NAME)
@@ -19,7 +23,7 @@ _log = logging.getLogger(_NAME)
 # -------------------
 
 
-def _parse_line(line):
+def _parse_line(line: str) -> tuple[str | None, str, str | None, str | None]:
     # RFC 1459 - 2.3.1
     # <message>  ::= [':' <prefix> <SPACE> ] <command> <params> <crlf>
     # <prefix>   ::= <servername> | <nick> [ '!' <user> ] [ '@' <host> ]
@@ -39,21 +43,27 @@ def _parse_line(line):
     if prefix:
         sender = prefix.split("!")[0]
 
-    rest = rest.split(None, 1)
-    command = rest[0].upper()
+    command_and_rest = rest.split(None, 1)
+    command = command_and_rest[0].upper()
 
-    if len(rest) == 2:
-        params = rest[1]
-        params = params.split(":", 1)
+    if len(command_and_rest) == 2:  # noqa: PLR2004 (magic-value-comparison)
+        params = command_and_rest[1].split(":", 1)
         middle = params[0].strip()
-        if len(params) == 2:
+        if len(params) == 2:  # noqa: PLR2004 (magic-value-comparison)
             trailing = params[1].strip()
 
     return sender, command, middle, trailing
 
 
 class IRCClient:
-    def __init__(self, client_config, callback):
+    """IRC client."""
+
+    def __init__(
+        self,
+        client_config: dict[str, Any],
+        callback: Callable[[list[str], str, str], None],
+    ) -> None:
+        """Initialize IRC client."""
         self._log = logging.getLogger(type(self).__name__)
         self._tls = client_config["tls"]
         self._host = client_config["host"]
@@ -61,75 +71,83 @@ class IRCClient:
         self._nick = client_config["nick"]
         self._password = client_config["password"]
         self._channels = client_config["channels"]
-        self._socket = None
         self._lock = threading.Lock()
         self._callback = callback
         self._recovery_delay = 1
         self.running = True
-        self._channel_nicks = {}
+        self._channel_nicks: dict[str, set[str]] = {}
 
-    def __str__(self):
-        return (
-            f"{self.__class__.__name__}: " f"{self._host}, {self._port}, {self._nick}"
-        )
+    def __str__(self) -> str:
+        """Return string representation."""
+        return f"{self.__class__.__name__}: {self._host}, {self._port}, {self._nick}"
 
-    def run(self):
+    def run(self) -> None:
+        """Connect to IRC network and forward messages."""
         while self.running:
             try:
                 self._run()
-            except Exception:
+            except Exception:  # noqa: PERF203, BLE001 (try-except-in-loop, blind-except)
                 self._log.exception("Client encountered error")
                 self._log.info("Reconnecting in %d s", self._recovery_delay)
                 time.sleep(self._recovery_delay)
                 self._recovery_delay = min(self._recovery_delay * 2, 3600)
 
-    def _run(self):
+    def _run(self) -> None:
         self._connect()
         self._auth()
         self._join()
         self._monitor()
 
-    def _connect(self):
+    def _connect(self) -> None:
         self._socket = socket.create_connection((self._host, self._port))
         if self._tls:
             tls_context = ssl.create_default_context()
             self._socket = tls_context.wrap_socket(
-                self._socket, server_hostname=self._host
+                self._socket,
+                server_hostname=self._host,
             )
 
-    def _auth(self):
-        self._lock_send("PASS {}".format(self._password))
-        self._lock_send("NICK {}".format(self._nick))
+    def _auth(self) -> None:
+        self._lock_send(f"PASS {self._password}")
+        self._lock_send(f"NICK {self._nick}")
         self._lock_send(
-            "USER {} {} {} :{}".format(self._nick, self._nick, self._host, self._nick)
+            f"USER {self._nick} {self._nick} {self._host} :{self._nick}",
         )
 
-    def _join(self):
+    def _join(self) -> None:
         for channel in self._channels:
-            channel_name = channel["channel"]
-            self._lock_send("JOIN {}".format(channel_name))
-            self._channel_nicks[channel_name] = set()
+            self._lock_send(f"JOIN {channel['channel']}")
+            self._channel_nicks[channel["channel"]] = set()
 
-    def _monitor(self):
+    def _monitor(self) -> None:  # noqa: C901, PLR0915, PLR0912
         for line in self._recv():
             self._log.info("recv: %s", line)
             sender, command, middle, trailing = _parse_line(line)
             self._log.info("parsed: %s, %s, %s, %s", sender, command, middle, trailing)
             if command == "PING":
-                self._lock_send("PONG :{}".format(trailing))
+                self._lock_send(f"PONG :{trailing}")
             elif command == "353":
-                channel = middle.split()[-1]
+                if middle is None or trailing is None:
+                    _log.warning("Malformed 353 payload")
+                    continue
+                channel_name = middle.split()[-1]
                 nicks = trailing.split()
                 nicks = [nick[1:] if nick[0] == "@" else nick for nick in nicks]
                 nicks = [nick[1:] if nick[0] == "+" else nick for nick in nicks]
                 for nick in nicks:
-                    self._channel_nicks[channel].add(nick)
+                    self._channel_nicks[channel_name].add(nick)
             elif command == "PRIVMSG":
+                if middle is None or trailing is None:
+                    _log.warning("Malformed PRIVMSG payload")
+                    continue
                 channel = self._find_channel_config(middle)
                 infix = channel["infix"]
                 self._callback(channel["to"], f"<{sender}{infix}> ", trailing)
                 self._recovery_delay = 1
             elif command == "JOIN":
+                if sender is None or middle is None:
+                    _log.warning("Malformed JOIN payload")
+                    continue
                 channel = self._find_channel_config(middle)
                 message = (
                     f'{sender}{channel["infix"]} has joined '
@@ -139,6 +157,9 @@ class IRCClient:
                 self._callback(channel["to"], "", message)
                 self._recovery_delay = 1
             elif command == "PART":
+                if sender is None or middle is None:
+                    _log.warning("Malformed PART payload")
+                    continue
                 channel = self._find_channel_config(middle)
                 reason = f" [{trailing}]" if trailing is not None else ""
                 message = (
@@ -149,6 +170,9 @@ class IRCClient:
                 self._callback(channel["to"], "", message)
                 self._recovery_delay = 1
             elif command == "NICK":
+                if sender is None or trailing is None:
+                    _log.warning("Malformed NICK payload")
+                    continue
                 nick_channels = self._find_channels_containing_nick(sender)
                 message = f"{sender} is now known as {trailing} on {self._host}"
                 for channel_name in nick_channels:
@@ -158,6 +182,9 @@ class IRCClient:
                     self._callback(channel["to"], "", message)
                 self._recovery_delay = 1
             elif command == "QUIT":
+                if sender is None:
+                    _log.warning("Malformed QUIT payload")
+                    continue
                 nick_channels = self._find_channels_containing_nick(sender)
                 reason = f" [{trailing}]" if trailing is not None else ""
                 message = f"{sender} has quit {self._host}{reason}"
@@ -169,42 +196,42 @@ class IRCClient:
 
         self._log.info("Stopping ...")
 
-    def _find_channel_config(self, middle):
-        for channel in self._channels:
-            if channel["channel"] == middle.lower():
-                return channel
-        return None
+    def _find_channel_config(self, channel_name: str) -> dict:
+        for channel_config in self._channels:
+            if channel_config["channel"] == channel_name.lower():
+                return channel_config
+        msg = f"Unknown channel name: {channel_name}"
+        raise ValueError(msg)
 
-    def _find_channels_containing_nick(self, nick):
+    def _find_channels_containing_nick(self, nick: str) -> list[str]:
         return [k for k, v in self._channel_nicks.items() if nick in v]
 
-    def _recv(self):
+    def _recv(self) -> Iterator[str]:
         buffer = ""
         while self.running:
             data = self._socket.recv(1024)
             if len(data) == 0:
                 message = "Received zero-length payload from server"
                 logging.error(message)
-                raise Exception(message)
+                raise ZeroLengthPayloadError(message)
             buffer += data.decode(errors="replace")
             lines = buffer.split("\r\n")
             lines, buffer = lines[:-1], lines[-1]
-            for line in lines:
-                yield line
+            yield from lines
         self._log.info("Stopping ...")
 
-    def _sock_send(self, message):
+    def _sock_send(self, message: str) -> None:
         self._socket.sendall(message.encode() + b"\r\n")
         self._log.info("sent: %s", message)
 
-    def _lock_send(self, message):
+    def _lock_send(self, message: str) -> None:
         with self._lock:
             self._sock_send(message)
 
-    def _send_action(self, recipient, message):
+    def _send_action(self, recipient: str, message: str) -> None:
         self._lock_send(f"PRIVMSG {recipient} :\x01ACTION {message}\x01")
 
-    def _send_message(self, recipient, prefix, message):
+    def _send_message(self, recipient: str, prefix: str, message: str) -> None:
         prefix = prefix.translate(str.maketrans("\0\r\n", "   "))
         message = message.replace("\0", " ")
         size = 400 - len(prefix)
@@ -214,7 +241,8 @@ class IRCClient:
                 for chunk in chunks:
                     self._sock_send(f"PRIVMSG {recipient} :{prefix}{chunk}")
 
-    def forward_message(self, to_labels, prefix, message):
+    def forward_message(self, to_labels: list[str], prefix: str, message: str) -> None:
+        """Forward message to channels with the specified labels."""
         channels = [c for c in self._channels if c["label"] in to_labels]
         for channel in channels:
             self._send_message(channel["channel"], prefix, message)
@@ -224,36 +252,57 @@ class IRCClient:
 # ------
 
 
-def http_request(method, url, data, headers):
+def http_request(
+    method: str,
+    url: str,
+    data: dict[str, Any],
+    headers: dict[str, str],
+) -> dict:
+    """Send an HTTP request and return JSON response as a dictionary."""
     if method == "GET":
         url = url + "?" + urllib.parse.urlencode(data)
         data = {}
-    data = json.dumps(data).encode()
+
+    encoded_data = json.dumps(data).encode()
+
     try:
         _log.info("Sending HTTP request %s ...", url)
-        request = urllib.request.Request(url, data=data, headers=headers, method=method)
-        with urllib.request.urlopen(request) as response:
-            body = json.loads(response.read().decode())
-            return body
+        request = urllib.request.Request(  # noqa: S310 (suspicious-url-open-usage)
+            url,
+            data=encoded_data,
+            headers=headers,
+            method=method,
+        )
+        with urllib.request.urlopen(request) as response:  # noqa: S310 (suspicious-url-open-usage)
+            return json.loads(response.read().decode())
     except urllib.error.HTTPError as err:
         body = err.read().decode()
         logging.exception("HTTP Error response: %r", body)
         raise
 
 
-def lookup_map(data, keys):
+def lookup_map(data: dict[Any, Any], keys: list[str]) -> Any:  # noqa: ANN401 (any-type)
+    """Recursively look up value in dictionary using given keys."""
+    d: Any = data
     for key in keys:
-        data = data.get(key)
-        if data is None:
+        d = d.get(key)
+        if d is None:
             break
-    return data
+    return d
 
 
 class MatrixClient:
+    """Matrix client."""
+
     MSG_MESSAGE = "msg_message"
     MSG_MEMBER = "msg_member"
 
-    def __init__(self, client_config, callback):
+    def __init__(
+        self,
+        client_config: dict[str, Any],
+        callback: Callable[[list[str], str, str], None],
+    ) -> None:
+        """Initialize Matrix client."""
         self._log = logging.getLogger(type(self).__name__)
         self._server = client_config["server"]
         self._username = client_config["username"]
@@ -261,7 +310,6 @@ class MatrixClient:
         self._rooms = client_config["rooms"]
         self._room_id = None
         self._enc_room_id = None
-        self._token = None
         self._txn = 0
         self._next_batch = None
         self._lock = threading.Lock()
@@ -269,27 +317,29 @@ class MatrixClient:
         self._recovery_delay = 1
         self.running = True
 
-    def __str__(self):
+    def __str__(self) -> str:
+        """Return string representation."""
         return f"{self.__class__.__name__}: {self._server}, {self._username}"
 
-    def run(self):
+    def run(self) -> None:
+        """Connect to Matrix server and forward messages."""
         while self.running:
             try:
                 self._run()
-            except Exception:
+            except Exception:  # noqa: PERF203, BLE001 (try-except-in-loop, blind-except)
                 self._log.exception("Client encountered error")
                 self._log.info("Reconnecting in %d s", self._recovery_delay)
                 time.sleep(self._recovery_delay)
                 self._recovery_delay = min(self._recovery_delay * 2, 60)
 
-    def _run(self):
+    def _run(self) -> None:
         self._connect()
         self._sync()
         self._join()
         self._monitor()
 
-    def _connect(self):
-        url = "{}/_matrix/client/v3/login".format(self._server)
+    def _connect(self) -> None:
+        url = f"{self._server}/_matrix/client/v3/login"
         headers = {"Content-Type": "application/json"}
         data = {
             "identifier": {
@@ -302,54 +352,61 @@ class MatrixClient:
         response = http_request("POST", url, data, headers)
         self._token = response["access_token"]
 
-    def _sync(self):
-        url = "{}/_matrix/client/v3/sync".format(self._server)
+    def _sync(self) -> None:
+        url = f"{self._server}/_matrix/client/v3/sync"
         headers = {"Authorization": "Bearer " + self._token}
         response = http_request("GET", url, {}, headers)
         self._next_batch = response["next_batch"]
 
-    def _join(self):
+    def _join(self) -> None:
         for room in self._rooms:
             enc_room = urllib.parse.quote(room["room"])
-            url = "{}/_matrix/client/v3/join/{}".format(self._server, enc_room)
+            url = f"{self._server}/_matrix/client/v3/join/{enc_room}"
             headers = {"Authorization": "Bearer " + self._token}
             response = http_request("POST", url, {}, headers)
             room["room_id"] = response["room_id"]
 
-    def _monitor(self):
+    def _monitor(self) -> None:
         while self.running:
             self._new_sync()
         self._log.info("Stopping ...")
 
-    def _new_sync(self):
-        url = "{}/_matrix/client/v3/sync".format(self._server)
+    def _new_sync(self) -> None:
+        url = f"{self._server}/_matrix/client/v3/sync"
         headers = {"Authorization": "Bearer " + self._token}
         data = {"since": self._next_batch, "timeout": 60000}
         response = http_request("GET", url, data, headers)
         self._next_batch = response["next_batch"]
-        for kind, room, sender, content in self._read_messages(response):
-            self._log.info("read: %s: %s: %s: %s", kind, room["room"], sender, content)
+        for msgtype, room, sender, content in self._read_messages(response):
+            self._log.info(
+                "read: %s: %s: %s: %s", msgtype, room["room"], sender, content
+            )
             infix = room["infix"]
-            if kind == MatrixClient.MSG_MESSAGE:
+            if msgtype == MatrixClient.MSG_MESSAGE:
                 self._callback(room["to"], f"<{sender}{infix}> ", content)
                 self._recovery_delay = 1
-            elif kind == MatrixClient.MSG_MEMBER:
+            elif msgtype == MatrixClient.MSG_MEMBER:
                 action = {
                     "join": " has joined ",
                     "leave": " has left ",
-                }.get(content) + f'{room["room"]} ({self._server})'
+                }[content] + f'{room["room"]} ({self._server})'
                 message = f"{sender}{action}"
                 self._callback(room["to"], "", message)
                 self._recovery_delay = 1
 
-    def _read_messages(self, response):
+    def _read_messages(
+        self, response: dict[str, str]
+    ) -> Iterator[tuple[str, dict[str, Any], str, str]]:
         for room in self._rooms:
-            for kind, sender, content in self._read_room_messages(
-                room["room_id"], response
+            for msgtype, sender, content in self._read_room_messages(
+                room["room_id"],
+                response,
             ):
-                yield kind, room, sender, content
+                yield msgtype, room, sender, content
 
-    def _read_room_messages(self, room_id, response):
+    def _read_room_messages(
+        self, room_id: str, response: dict[str, str]
+    ) -> Iterator[tuple[str, str, str]]:
         events = lookup_map(response, ["rooms", "join", room_id, "timeline", "events"])
         if events is None:
             return
@@ -372,18 +429,19 @@ class MatrixClient:
                 membership = lookup_map(event, ["content", "membership"])
                 yield MatrixClient.MSG_MEMBER, sender, membership
 
-    def _get_display_name(self, user_id):
+    def _get_display_name(self, user_id: str) -> str:
         enc_user_id = urllib.parse.quote(user_id)
         url = f"{self._server}/_matrix/client/v3/profile/{enc_user_id}"
         headers = {"Authorization": "Bearer " + self._token}
         response = http_request("GET", url, {}, headers)
         return response["displayname"]
 
-    def _send(self, msgtype, room_id, message):
+    def _send(self, msgtype: str, room_id: str, message: str) -> None:
         enc_room_id = urllib.parse.quote(room_id)
         with self._lock:
-            url = "{}/_matrix/client/v3/rooms/{}/send/m.room.message/{}".format(
-                self._server, enc_room_id, self._txn
+            url = (
+                f"{self._server}/_matrix/client/v3/"
+                f"rooms/{enc_room_id}/send/m.room.message/{self._txn}"
             )
             headers = {"Authorization": "Bearer " + self._token}
             data = {
@@ -394,25 +452,30 @@ class MatrixClient:
             http_request("PUT", url, data, headers)
         self._log.info("sent: %s", message)
 
-    def send_message(self, room_id, prefix, message):
-        self._send("m.text", room_id, "{}{}".format(prefix, message))
+    def _send_message(self, room_id: str, prefix: str, message: str) -> None:
+        self._send("m.text", room_id, f"{prefix}{message}")
 
-    def send_notice(self, room_id, message):
+    def _send_notice(self, room_id: str, message: str) -> None:
         self._send("m.notice", room_id, message)
 
-    def forward_message(self, to_labels, prefix, message):
+    def forward_message(self, to_labels: list[str], prefix: str, message: str) -> None:
+        """Forward message to rooms with the specified labels."""
         rooms = [r for r in self._rooms if r["label"] in to_labels]
         for room in rooms:
             if prefix == "":
-                self.send_notice(room["room_id"], message)
+                self._send_notice(room["room_id"], message)
             else:
-                self.send_message(room["room_id"], prefix, message)
+                self._send_message(room["room_id"], prefix, message)
 
 
-def create_clients(clients_config):
-    clients = []
+Client = IRCClient | MatrixClient
 
-    def callback(to_labels, sender_prefix, message):
+
+def create_clients(clients_config: list[dict[str, Any]]) -> list[Client]:
+    """Create all configured clients."""
+    clients: list[Client] = []
+
+    def callback(to_labels: list[str], sender_prefix: str, message: str) -> None:
         for client in clients:
             client.forward_message(to_labels, sender_prefix, message)
 
@@ -428,7 +491,8 @@ def create_clients(clients_config):
     return clients
 
 
-def run(clients):
+def run(clients: list[Client]) -> None:
+    """Execute all clients."""
     workers = []
     for client in clients:
         worker = threading.Thread(target=client.run)
@@ -443,16 +507,21 @@ def run(clients):
     _log.info("All workers have quit")
 
 
-def main():
+def main() -> None:
+    """Run this tool."""
     log_fmt = (
         "%(asctime)s %(levelname)s %(threadName)s "
         "%(filename)s:%(lineno)d %(name)s.%(funcName)s() %(message)s"
     )
     logging.basicConfig(format=log_fmt, level=logging.INFO)
-    with open("{}.json".format(_NAME), encoding="utf-8") as stream:
+    with pathlib.Path(f"{_NAME}.json").open() as stream:
         config = json.load(stream)
     clients = create_clients(config["clients"])
     run(clients)
+
+
+class ZeroLengthPayloadError(Exception):
+    """Zero length payload has been received from the server."""
 
 
 if __name__ == "__main__":

@@ -33,3 +33,7 @@ build-backend = "setuptools.build_meta"
 # module.
 [tool.setuptools]
 py-modules = ["nimb"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = ["ANN101", "COM812"]

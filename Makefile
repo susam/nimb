@@ -25,11 +25,12 @@ venv: FORCE
 	rm -rf $(VENV)/
 	python3 -m venv $(VENV)/
 	$(VENV)/bin/pip3 install -U build twine
-	$(VENV)/bin/pip3 install ruff
+	$(VENV)/bin/pip3 install ruff mypy
 
 lint:
-	$(VENV)/bin/ruff check --select ALL
+	$(VENV)/bin/ruff check
 	$(VENV)/bin/ruff format --diff
+	$(VENV)/bin/mypy .
 
 test:
 	$(VENV)/bin/python3 -m unittest -v
