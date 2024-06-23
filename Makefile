@@ -19,28 +19,25 @@ help:
 # Development Targets
 # -------------------
 
-rmvenv:
-	rm -rf ~/.venv/nimb venv
+VENV = ~/.venv/nimb
 
 venv: FORCE
-	python3 -m venv ~/.venv/nimb
-	echo . ~/.venv/nimb/bin/activate > venv
-	. ./venv && pip3 install -U build twine
-	. ./venv && pip3 install pylint pycodestyle pydocstyle pyflakes isort
+	rm -rf $(VENV)/
+	python3 -m venv $(VENV)/
+	$(VENV)/bin/pip3 install -U build twine
+	$(VENV)/bin/pip3 install ruff
 
 lint:
-	. ./venv && ! isort --quiet --diff . | grep .
-	. ./venv && pycodestyle .
-	. ./venv && pyflakes .
-	. ./venv && pylint -d C0115,R0902,C0116,C0209,W0703 nimb
+	$(VENV)/bin/ruff check --select ALL
+	$(VENV)/bin/ruff format --diff
 
 test:
-	python3 -m unittest -v
+	$(VENV)/bin/python3 -m unittest -v
 
 coverage:
-	. ./venv && coverage run --branch -m unittest -v
-	. ./venv && coverage report --show-missing
-	. ./venv && coverage html
+	$(VENV)/bin/coverage run --branch -m unittest -v
+	$(VENV)/bin/coverage report --show-missing
+	$(VENV)/bin/coverage html
 
 check-password:
 	! grep -r '"password":' . | grep -vE '^\./[^/]*.json|Makefile|\.\.\.'

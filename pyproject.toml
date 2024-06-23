@@ -1,6 +1,6 @@
 [project]
 name = "nimb"
-version = "0.1.0"
+version = "0.2.0"
 description = "NIMB - NIMB IRC Matrix Bridge"
 readme = "etc/PKG-README.md"
 license = {text = "MIT"}
