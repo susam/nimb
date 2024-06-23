@@ -115,7 +115,7 @@ class IRCClient:
             elif command == 'PRIVMSG':
                 channel = self._find_channel_config_by_middle(middle)
                 infix = channel['infix']
-                self._callback(channel['to'], f'{sender}{infix}: ', trailing)
+                self._callback(channel['to'], f'<{sender}{infix}> ', trailing)
                 self._recovery_delay = 1
             elif command in ('JOIN', 'PART'):
                 channel = self._find_channel_config_by_middle(middle)
@@ -326,7 +326,7 @@ class MatrixClient:
                            kind, room['room'], sender, content)
             infix = room['infix']
             if kind == MatrixClient.MSG_MESSAGE:
-                self._callback(room['to'], f'{sender}{infix}: ', content)
+                self._callback(room['to'], f'<{sender}{infix}> ', content)
                 self._recovery_delay = 1
             elif kind == MatrixClient.MSG_MEMBER:
                 action = {
