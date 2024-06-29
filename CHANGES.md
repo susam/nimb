@@ -1,7 +1,7 @@
 Changelog
 =========
 
-0.2.0 (UNRELEASED)
+0.2.0 (2024-06-29)
 ------------------
 
 ### Added
@@ -16,6 +16,8 @@ Changelog
 - Channels in the same network/server are joined by the same client.
 - Include Matrix user's display name in forwarded messages.
 - Reconnect to network/server on encountering error.
+- Use angle brackets (i.e., `<` and `>`) to delimit sender name in
+  forwarded messages.
 
 
 0.1.0 (2022-12-28)
