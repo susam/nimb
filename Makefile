@@ -55,31 +55,32 @@ clean:
 # --------------------
 
 dist: clean
-	. ./venv && python3 -m build
-	. ./venv && twine check dist/*
+	$(VENV)/bin/python3 -m build
+	$(VENV)/bin/twine check dist/*
 	unzip -c dist/*.whl '*/METADATA'
 	unzip -t dist/*.whl
 	tar -tvf dist/*.tar.gz
 
 upload:
-	. ./venv && twine upload dist/*
+	$(VENV)/bin/twine upload dist/*
+
+UVENV=~/.venv/user-nimb
 
 user-venv: FORCE
-	rm -rf ~/.venv/user-nimb user-venv
-	python3 -m venv ~/.venv/user-nimb
-	echo . ~/.venv/user-nimb/bin/activate > user-venv
+	rm -rf $(UVENV)/
+	python3 -m venv $(UVENV)/
 
 verify-upload:
 	$(MAKE) verify-sdist
 	$(MAKE) verify-bdist
 
 verify-sdist: user-venv
-	. ./user-venv && pip3 install --no-binary :all: nimb
-	. ./user-venv && command -v nimb
+	$(UVENV)/bin/pip3 install --no-binary :all: nimb
+	ls -l $(UVENV)/bin/nimb
 
 verify-bdist: user-venv
-	. ./user-venv && pip3 install nimb
-	. ./user-venv && command -v nimb
+	$(UVENV)/bin/pip3 install nimb
+	ls -l $(UVENV)/bin/nimb
 
 
 # Deployment Targets

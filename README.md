@@ -267,7 +267,6 @@ To report bugs, suggest improvements, or ask questions, please create
 a new issue at <http://github.com/susam/nimb/issues>.
 
 <!--
-
 - Update version in pyproject.toml.
 
 - Update CHANGES.md.
@@ -284,7 +283,7 @@ a new issue at <http://github.com/susam/nimb/issues>.
   make dist upload verify-upload
 
   VER=$(grep version pyproject.toml | cut -d '"' -f2)
+  echo $VER
   git tag $VER -m "NIMB $VER"
-  git push origin $VER
-
+  git push origin main $VER
 -->
