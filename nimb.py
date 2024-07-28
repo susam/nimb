@@ -284,7 +284,7 @@ def http_request(
             with urllib.request.urlopen(request) as response:  # noqa: S310 (suspicious-url-open-usage)
                 return json.loads(response.read().decode())
         except urllib.error.HTTPError as err:  # noqa: PERF203 (try-except-in-loop)
-            logging.exception(
+            logging.error(  # noqa: TRY400 (error-instead-of-exception)
                 "HTTP Error response: %d, %r, %r, %r",
                 err.code,
                 err.reason,
