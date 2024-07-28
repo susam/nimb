@@ -74,6 +74,7 @@ class IRCClient:
         self._lock = threading.Lock()
         self._callback = callback
         self._recovery_delay = 1
+        self._last_send_time = 0.0
         self.running = True
         self._channel_nicks: dict[str, set[str]] = {}
 
@@ -88,7 +89,7 @@ class IRCClient:
                 self._run()
             except Exception:  # noqa: PERF203, BLE001 (try-except-in-loop, blind-except)
                 self._log.exception("Client encountered error")
-                self._log.info("Reconnecting in %d s", self._recovery_delay)
+                self._log.info("Reconnecting in %d s ...", self._recovery_delay)
                 time.sleep(self._recovery_delay)
                 self._recovery_delay = min(self._recovery_delay * 2, 3600)
 
@@ -221,7 +222,12 @@ class IRCClient:
         self._log.info("Stopping ...")
 
     def _sock_send(self, message: str) -> None:
+        throttle_delay = 1.0 - (time.time() - self._last_send_time)
+        if throttle_delay > 0:
+            self._log.info("throttling for %d s", throttle_delay)
+            time.sleep(throttle_delay)
         self._socket.sendall(message.encode() + b"\r\n")
+        self._last_send_time = time.time()
         self._log.info("sent: %s", message)
 
     def _lock_send(self, message: str) -> None:
@@ -264,21 +270,33 @@ def http_request(
         data = {}
 
     encoded_data = json.dumps(data).encode()
+    request = urllib.request.Request(  # noqa: S310 (suspicious-url-open-usage)
+        url,
+        data=encoded_data,
+        headers=headers,
+        method=method,
+    )
 
-    try:
-        _log.info("Sending HTTP request %s ...", url)
-        request = urllib.request.Request(  # noqa: S310 (suspicious-url-open-usage)
-            url,
-            data=encoded_data,
-            headers=headers,
-            method=method,
-        )
-        with urllib.request.urlopen(request) as response:  # noqa: S310 (suspicious-url-open-usage)
-            return json.loads(response.read().decode())
-    except urllib.error.HTTPError as err:
-        body = err.read().decode()
-        logging.exception("HTTP Error response: %r", body)
-        raise
+    retry = 0
+    while True:
+        try:
+            _log.info("Sending HTTP request %s ...", url)
+            with urllib.request.urlopen(request) as response:  # noqa: S310 (suspicious-url-open-usage)
+                return json.loads(response.read().decode())
+        except urllib.error.HTTPError as err:  # noqa: PERF203 (try-except-in-loop)
+            logging.exception(
+                "HTTP Error response: %d, %r, %r, %r",
+                err.code,
+                err.reason,
+                err.headers,
+                err.read().decode(),
+            )
+            if err.code == 429 and retry <= 5:  # noqa: PLR2004 (magic-value-comparison)
+                retry += 1
+                logging.info("Retrying HTTP request in %d s ...", retry)
+                time.sleep(retry)
+                continue
+            raise
 
 
 def lookup_map(data: dict[Any, Any], keys: list[str]) -> Any:  # noqa: ANN401 (any-type)
@@ -328,7 +346,7 @@ class MatrixClient:
                 self._run()
             except Exception:  # noqa: PERF203, BLE001 (try-except-in-loop, blind-except)
                 self._log.exception("Client encountered error")
-                self._log.info("Reconnecting in %d s", self._recovery_delay)
+                self._log.info("Reconnecting in %d s ...", self._recovery_delay)
                 time.sleep(self._recovery_delay)
                 self._recovery_delay = min(self._recovery_delay * 2, 60)
 

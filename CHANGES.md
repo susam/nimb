@@ -1,6 +1,15 @@
 Changelog
 =========
 
+0.3.0 (UNRELEASED)
+------------------
+
+### Changed
+
+- Throttle messages sent to IRC channels.
+- Retry HTTP request on receiving HTTP 429 error from Matrix API server.
+
+
 0.2.0 (2024-06-29)
 ------------------
 
