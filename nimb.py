@@ -285,10 +285,10 @@ def http_request(
                 return json.loads(response.read().decode())
         except urllib.error.HTTPError as err:  # noqa: PERF203 (try-except-in-loop)
             logging.error(  # noqa: TRY400 (error-instead-of-exception)
-                "HTTP Error response: %d, %r, %r, %r",
+                "HTTP Error: code: %d; reason: %r; headers: %r; body: %r",
                 err.code,
                 err.reason,
-                err.headers,
+                dict(err.headers),
                 err.read().decode(),
             )
             if err.code == 429 and retry <= 5:  # noqa: PLR2004 (magic-value-comparison)
