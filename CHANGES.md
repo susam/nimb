@@ -9,6 +9,11 @@ Changelog
 - Throttle messages sent to IRC channels.
 - Retry HTTP request on receiving HTTP 429 error from Matrix API server.
 
+### Fixed
+
+- Prevent source client from crashing when destination clients
+  encounter errors while forwarding messages.
+
 
 0.2.0 (2024-06-29)
 ------------------

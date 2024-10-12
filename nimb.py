@@ -224,7 +224,7 @@ class IRCClient:
     def _sock_send(self, message: str) -> None:
         throttle_delay = 1.0 - (time.time() - self._last_send_time)
         if throttle_delay > 0:
-            self._log.info("throttling for %d s", throttle_delay)
+            self._log.info("throttling for %.3f s", throttle_delay)
             time.sleep(throttle_delay)
         self._socket.sendall(message.encode() + b"\r\n")
         self._last_send_time = time.time()
@@ -495,7 +495,10 @@ def create_clients(clients_config: list[dict[str, Any]]) -> list[Client]:
 
     def callback(to_labels: list[str], sender_prefix: str, message: str) -> None:
         for client in clients:
-            client.forward_message(to_labels, sender_prefix, message)
+            try:
+                client.forward_message(to_labels, sender_prefix, message)
+            except Exception:  # noqa: PERF203, BLE001 (try-except-in-loop, blind-except)
+                _log.exception("%s failed to forward message", client)
 
     for index, client_config in enumerate(clients_config):
         client_type = client_config["type"]
